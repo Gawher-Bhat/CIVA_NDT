@@ -1,0 +1,61 @@
+Algorithm A3 Absolute time of flight between 2nd and 3rd time reflection
+
+import sys
+import os
+import tempfile
+import numpy as np
+from scipy.signal import find_peaks
+from CivaScript.extraction_reader import ExtractionReader
+from CivaScript.extraction_writer import ExtractionWriter
+
+fileMySelf = sys.argv[0]
+filenameInput = sys.argv[1]  # Extracted data file
+filenameOutput = filenameInput
+filenameParam = None
+
+filename, suffix = os.path.splitext(filenameInput)
+prefix = os.path.basename(filename)
+dir = os.path.dirname(filename)
+
+fout = tempfile.NamedTemporaryFile(suffix=suffix, prefix=prefix, dir=dir).name
+
+with ExtractionReader(filenameInput) as db_reader:
+    id = 'PluginTOF'
+    label = "Absolute TOF between 2nd and 3rd Interface"
+    
+    with ExtractionWriter(fout, id, label) as db_writer:
+        nbDataset = db_reader.read_nb_dataset()
+        for idxDataset in range(nbDataset):
+            key, name_ds, mat = db_reader.read_dataset(idxDataset) 
+            properties_ds = db_reader.read_properties(idxDataset)
+            t0 = properties_ds['t0']  # Initial time
+            dt = properties_ds['dt']  # Time step
+            
+            idx_time = 4  # Time axis index
+            nb_seq = np.shape(mat)[2]  # Sequence count
+            TOF_Abs = np.zeros([nb_seq], dtype=np.float64)
+            
+            for iSeq in range(nb_seq):
+                subMat = np.abs(mat[:, :, iSeq, :, :])  # Take absolute values
+                subMat_mean = np.mean(subMat, axis=(0, 1, 2))  # Average over inc, scan, shot
+                
+                peaks, _ = find_peaks(subMat_mean, height=np.max(subMat_mean) * 0.3)  # Detect peaks
+                
+                if len(peaks) >= 3:  # Ensure we have at least 3 reflections
+                    first_interface_idx = peaks[0]
+                    second_interface_idx = peaks[1]
+                    third_interface_idx = peaks[2]
+                    
+                    TOF_second = t0 + dt * second_interface_idx
+                    TOF_third = t0 + dt * third_interface_idx
+                    TOF_Abs[iSeq] = TOF_third - TOF_second
+                else:
+                    TOF_Abs[iSeq] = np.nan  # Assign NaN if reflections are not found
+            
+            db_writer.write_dataset(key + '.TOF_Abs', 'Absolute TOF 2nd-3rd Interface', TOF_Abs)
+            
+if os.path.exists(filenameOutput):
+    os.remove(filenameOutput)
+os.rename(fout, filenameOutput)
+
+print('Plugin Python extraction OK')
