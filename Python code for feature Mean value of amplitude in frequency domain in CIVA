@@ -1,0 +1,55 @@
+Algorithm A4 Mean value of amplitude in frequency domain
+
+import sys
+import os
+import tempfile
+import numpy as np
+from CivaScript.extraction_reader import ExtractionReader
+from CivaScript.extraction_writer import ExtractionWriter
+
+fileMySelf     = sys.argv[0]
+filenameInput  = sys.argv[1]  # File containing extracted data
+filenameOutput = filenameInput
+filenameParam  = None
+
+filename, suffix = os.path.splitext(filenameInput)
+prefix           = os.path.basename(filename)
+dir              = os.path.dirname(filename)
+
+fout = tempfile.NamedTemporaryFile(suffix=suffix, prefix=prefix, dir=dir).name
+
+with ExtractionReader(filenameInput) as db_reader:
+    id    = 'PluginFreqMeanSeq'
+    label = "Mean Frequency Amplitude (by sequence)"
+
+    with ExtractionWriter(fout, id, label) as db_writer:
+        nbDataset = db_reader.read_nb_dataset()
+        for idxDataset in range(nbDataset):
+            key, name_ds, mat = db_reader.read_dataset(idxDataset) 
+            properties_ds      = db_reader.read_properties(idxDataset)
+            t0 = properties_ds['t0']
+            dt = properties_ds['dt']
+
+            idx_ibst_seq  = 2  # IBST: 0=inc 1=scan 2=seq 3=shot 4=time
+            nb_seq = np.shape(mat)[idx_ibst_seq]
+            freqMeanA = np.zeros([nb_seq], dtype=np.float64)
+
+            for iSeq in range(nb_seq):  # Loop through sequences
+                subMat = mat[:,:,iSeq,:,:]  # Extract current sequence
+                
+                # Compute Fourier Transform and take absolute values
+                fft_values = np.fft.fft(subMat, axis=-1)
+                fft_amplitudes = np.abs(fft_values)
+                
+                # Compute mean amplitude in frequency domain
+                freqMeanA[iSeq] = np.mean(fft_amplitudes)
+
+            db_writer.write_dataset(key+'.FreqMean', 'Mean Frequency Amplitude', freqMeanA)
+            db_writer.write_dataset(key+'.FreqMeanMax', 'Max Mean Frequency Amplitude', np.nanmax(freqMeanA))     
+
+if os.path.exists(filenameOutput):
+    os.remove(filenameOutput)   
+os.rename(fout, filenameOutput) 
+
+print('Plugin Python extraction OK')
+
