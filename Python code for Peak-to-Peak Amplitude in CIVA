@@ -1,0 +1,69 @@
+Algorithm A1 Peak-to-Peak Amplitude at 2nd time reflection
+
+import sys
+import os
+import tempfile
+import numpy as np
+from CivaScript.extraction_reader import ExtractionReader
+from CivaScript.extraction_writer import ExtractionWriter
+
+fileMySelf     = sys.argv[0]
+filenameInput  = sys.argv[1]  # File containing extracted data
+filenameOutput = filenameInput
+filenameParam  = None
+
+filename, suffix = os.path.splitext(filenameInput)
+prefix           = os.path.basename(filename)
+dir              = os.path.dirname(filename)
+
+fout = tempfile.NamedTemporaryFile(suffix=suffix, prefix=prefix, dir=dir).name
+
+with ExtractionReader(filenameInput) as db_reader:
+    id    = 'PluginP2PSeq'
+    label = "Peak-to-Peak Dynamic (by sequence)"
+
+    with ExtractionWriter(fout, id, label) as db_writer:
+        nbDataset = db_reader.read_nb_dataset()
+        for idxDataset in range(nbDataset):
+            key, name_ds, mat = db_reader.read_dataset(idxDataset) 
+            properties_ds      = db_reader.read_properties(idxDataset)
+            t0 = properties_ds['t0']
+            dt = properties_ds['dt']
+
+            idx_ibst_seq  = 2  # IBST: 0=inc 1=scan 2=seq 3=shot 4=time
+            idx_ibst_Time = 4  
+            nb_seq = np.shape(mat)[idx_ibst_seq]
+            p2pDynA = np.zeros([nb_seq], dtype=np.float64)
+            p2pDynT = np.zeros([nb_seq], dtype=np.float64)
+
+            for iSeq in range(nb_seq):  # Loop through sequences
+                subMat   = mat[:,:,iSeq,:,:]  # Extract current sequence
+                subShape = np.shape(subMat)
+
+                # Find max and min within the sequence
+                imax = np.argmax(subMat)
+                imin = np.argmin(subMat)
+
+                # Get corresponding indices
+                if np.isfortran(subMat):
+                    indexes_max = np.unravel_index(imax, subShape, order='FORTRAN')
+                    indexes_min = np.unravel_index(imin, subShape, order='FORTRAN')
+                else:
+                    indexes_max = np.unravel_index(imax, subShape, order='C')
+                    indexes_min = np.unravel_index(imin, subShape, order='C')
+
+                # Compute Peak-to-Peak amplitude
+                p2pDynA[iSeq] = subMat[indexes_max] - subMat[indexes_min]
+
+                # Use max amplitude time index for P2P time reference
+                p2pDynT[iSeq] = dt * indexes_max[idx_ibst_Time-1] + t0           
+
+            db_writer.write_dataset(key+'.P2PDyn', 'Peak-to-Peak Dynamic', p2pDynA)
+            db_writer.write_dataset(key+'.FlyTimeP2P', 'Fly time of Peak-to-Peak Dynamic', p2pDynT)     
+            db_writer.write_dataset(key+'.P2PMax', 'Max Peak-to-Peak', np.nanmax(p2pDynA))     
+
+if os.path.exists(filenameOutput):
+    os.remove(filenameOutput)   
+os.rename(fout, filenameOutput) 
+
+print('Plugin Python extraction OK')
